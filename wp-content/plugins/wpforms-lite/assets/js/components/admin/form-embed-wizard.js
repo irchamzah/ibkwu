@@ -49,7 +49,15 @@ var WPFormsFormEmbedWizard = window.WPFormsFormEmbedWizard || ( function( docume
 		init: function() {
 
 			$( app.ready );
-			$( window ).on( 'load', app.load );
+			$( window ).on( 'load', function() {
+
+				// in case of jQuery 3.+ we need to wait for an `ready` event first.
+				if ( typeof $.ready.then === 'function' ) {
+					$.ready.then( app.load );
+				} else {
+					app.load();
+				}
+			} );
 		},
 
 		/**
@@ -70,9 +78,14 @@ var WPFormsFormEmbedWizard = window.WPFormsFormEmbedWizard || ( function( docume
 		 */
 		load: function() {
 
-			// Initialize tooltip.
+			// Initialize tooltip in page editor.
 			if ( wpforms_admin_form_embed_wizard.is_edit_page === '1' && ! vars.isChallengeActive ) {
 				app.initTooltip();
+			}
+
+			// Initialize wizard state in the form builder only.
+			if ( vars.isBuilder ) {
+				app.initialStateToggle();
 			}
 		},
 
@@ -85,13 +98,21 @@ var WPFormsFormEmbedWizard = window.WPFormsFormEmbedWizard || ( function( docume
 
 			// Caching some DOM elements for further use.
 			el = {
-				$wizardContainer: $( '#wpforms-admin-form-embed-wizard-container' ),
-				$wizard:          $( '#wpforms-admin-form-embed-wizard' ),
-				$sectionBtns:     $( '#wpforms-admin-form-embed-wizard-section-btns' ),
-				$sectionGo:       $( '#wpforms-admin-form-embed-wizard-section-go' ),
-				$newPageTitle:    $( '#wpforms-admin-form-embed-wizard-new-page-title' ),
-				$selectPage:      $( '#wpforms-admin-form-embed-wizard-select-page' ),
-				$videoTutorial:   $( '#wpforms-admin-form-embed-wizard-tutorial' ),
+				$wizardContainer:   $( '#wpforms-admin-form-embed-wizard-container' ),
+				$wizard:            $( '#wpforms-admin-form-embed-wizard' ),
+				$contentInitial:    $( '#wpforms-admin-form-embed-wizard-content-initial' ),
+				$contentSelectPage: $( '#wpforms-admin-form-embed-wizard-content-select-page' ),
+				$contentCreatePage: $( '#wpforms-admin-form-embed-wizard-content-create-page' ),
+				$sectionBtns:       $( '#wpforms-admin-form-embed-wizard-section-btns' ),
+				$sectionGo:         $( '#wpforms-admin-form-embed-wizard-section-go' ),
+				$newPageTitle:      $( '#wpforms-admin-form-embed-wizard-new-page-title' ),
+				$selectPage:        $( '#wpforms-admin-form-embed-wizard-select-page' ),
+				$videoTutorial:     $( '#wpforms-admin-form-embed-wizard-tutorial' ),
+				$sectionToggles:    $( '#wpforms-admin-form-embed-wizard-section-toggles' ),
+				$sectionGoBack:     $( '#wpforms-admin-form-embed-wizard-section-goback' ),
+				$shortcode:         $( '#wpforms-admin-form-embed-wizard-shortcode-wrap' ),
+				$shortcodeInput:    $( '#wpforms-admin-form-embed-wizard-shortcode' ),
+				$shortcodeCopy:     $( '#wpforms-admin-form-embed-wizard-shortcode-copy' ),
 			};
 
 			// Detect the form builder screen and store the flag.
@@ -99,6 +120,9 @@ var WPFormsFormEmbedWizard = window.WPFormsFormEmbedWizard || ( function( docume
 
 			// Detect the Challenge and store the flag.
 			vars.isChallengeActive = typeof WPFormsChallenge !== 'undefined';
+
+			// Are the pages exists?
+			vars.pagesExists = el.$wizard.data( 'pages-exists' ) === 1;
 		},
 
 		/**
@@ -108,10 +132,18 @@ var WPFormsFormEmbedWizard = window.WPFormsFormEmbedWizard || ( function( docume
 		 */
 		events: function() {
 
+			// Skip wizard events in the page editor.
+			if ( ! el.$wizard.length ) {
+				return;
+			}
+
 			el.$wizard
 				.on( 'click', 'button', app.popupButtonsClick )
 				.on( 'click', '.tutorial-toggle', app.tutorialToggle )
-				.on( 'click', '.wpforms-admin-popup-close', app.closePopup );
+				.on( 'click', '.shortcode-toggle', app.shortcodeToggle )
+				.on( 'click', '.initialstate-toggle', app.initialStateToggle )
+				.on( 'click', '.wpforms-admin-popup-close', app.closePopup )
+				.on( 'click', '#wpforms-admin-form-embed-wizard-shortcode-copy', app.copyShortcodeToClipboard );
 		},
 
 		/**
@@ -132,16 +164,20 @@ var WPFormsFormEmbedWizard = window.WPFormsFormEmbedWizard || ( function( docume
 			var	$div = $btn.closest( 'div' ),
 				action = $btn.data( 'action' ) || '';
 
+			el.$contentInitial.hide();
+
 			switch ( action ) {
 
 				// Select existing page.
 				case 'select-page':
 					el.$newPageTitle.hide();
+					el.$contentSelectPage.show();
 					break;
 
 				// Create a new page.
 				case 'create-page':
 					el.$selectPage.hide();
+					el.$contentCreatePage.show();
 					break;
 
 				// Let's Go!
@@ -157,6 +193,17 @@ var WPFormsFormEmbedWizard = window.WPFormsFormEmbedWizard || ( function( docume
 
 			$div.hide();
 			$div.next().fadeIn();
+			el.$sectionToggles.hide();
+			el.$sectionGoBack.fadeIn();
+
+			// Set focus to the field that is currently displayed.
+			$.each( [ el.$selectPage, el.$newPageTitle ], function() {
+				if ( this.is( ':visible' ) ) {
+					this.focus();
+				}
+			} );
+
+			app.tutorialControl( 'Stop' );
 		},
 
 		/**
@@ -170,15 +217,121 @@ var WPFormsFormEmbedWizard = window.WPFormsFormEmbedWizard || ( function( docume
 
 			e.preventDefault();
 
-			var iframe = el.$videoTutorial[0];
-
+			el.$shortcode.hide();
 			el.$videoTutorial.toggle();
 
-			if ( iframe.src.indexOf( '&autoplay=1' ) < 0 ) {
-				iframe.src += '&autoplay=1';
+			if ( el.$videoTutorial.attr( 'src' ) === 'about:blank' ) {
+				el.$videoTutorial.attr( 'src', wpforms_admin_form_embed_wizard.video_url );
+			}
+
+			if ( el.$videoTutorial[0].src.indexOf( '&autoplay=1' ) < 0 ) {
+				app.tutorialControl( 'Play' );
+			} else {
+				app.tutorialControl( 'Stop' );
+			}
+		},
+
+		/**
+		 * Toggle video tutorial inside popup.
+		 *
+		 * @since 1.6.2.3
+		 *
+		 * @param {string} action One of 'Play' or 'Stop'.
+		 */
+		tutorialControl: function( action ) {
+
+			var iframe = el.$videoTutorial[0];
+
+			if ( typeof iframe === 'undefined' ) {
+				return;
+			}
+
+			if ( action !== 'Stop' ) {
+				iframe.src +=  iframe.src.indexOf( '&autoplay=1' ) < 0 ? '&autoplay=1' : '';
 			} else {
 				iframe.src = iframe.src.replace( '&autoplay=1', '' );
 			}
+		},
+
+		/**
+		 * Toggle shortcode input field.
+		 *
+		 * @since 1.6.2.3
+		 *
+		 * @param {object} e Event object.
+		 */
+		shortcodeToggle: function( e ) {
+
+			e.preventDefault();
+
+			el.$videoTutorial.hide();
+			app.tutorialControl( 'Stop' );
+			el.$shortcodeInput.val( '[wpforms id="' + vars.formId + '" title="false"]' );
+			el.$shortcode.toggle();
+		},
+
+		/**
+		 * Copies the shortcode embed code to the clipboard.
+		 *
+		 * @since 1.6.4
+		 */
+		copyShortcodeToClipboard: function() {
+
+			// Remove disabled attribute, select the text, and re-add disabled attribute.
+			el.$shortcodeInput
+				.prop( 'disabled', false )
+				.select()
+				.prop( 'disabled', true );
+
+			// Copy it.
+			document.execCommand( 'copy' );
+
+			var $icon = el.$shortcodeCopy.find( 'i' );
+
+			// Add visual feedback to copy command.
+			$icon.removeClass( 'fa-files-o' ).addClass( 'fa-check' );
+
+			// Reset visual confirmation back to default state after 2.5 sec.
+			window.setTimeout( function() {
+				$icon.removeClass( 'fa-check' ).addClass( 'fa-files-o' );
+			}, 2500 );
+		},
+
+		/**
+		 * Toggle initial state.
+		 *
+		 * @since 1.6.2.3
+		 *
+		 * @param {object} e Event object.
+		 */
+		initialStateToggle: function( e ) {
+
+			if ( e ) {
+				e.preventDefault();
+			}
+
+			if ( vars.pagesExists ) {
+				el.$contentInitial.show();
+				el.$contentSelectPage.hide();
+				el.$contentCreatePage.hide();
+				el.$selectPage.show();
+				el.$newPageTitle.show();
+				el.$sectionBtns.show();
+				el.$sectionGo.hide();
+			} else {
+				el.$contentInitial.hide();
+				el.$contentSelectPage.hide();
+				el.$contentCreatePage.show();
+				el.$selectPage.hide();
+				el.$newPageTitle.show();
+				el.$sectionBtns.hide();
+				el.$sectionGo.show();
+			}
+			el.$shortcode.hide();
+			el.$videoTutorial.hide();
+			app.tutorialControl( 'Stop' );
+			el.$sectionToggles.show();
+			el.$sectionGoBack.hide();
 		},
 
 		/**
@@ -205,15 +358,13 @@ var WPFormsFormEmbedWizard = window.WPFormsFormEmbedWizard || ( function( docume
 				content: wpforms_builder.exit_confirm,
 				icon: 'fa fa-exclamation-circle',
 				type: 'orange',
-				backgroundDismiss: false,
-				closeIcon: false,
+				closeIcon: true,
 				buttons: {
 					confirm: {
 						text: wpforms_builder.save_embed,
 						btnClass: 'btn-confirm',
 						keys: [ 'enter' ],
 						action: function() {
-
 							WPFormsBuilder.formSave().done( app.embedPageRedirect );
 						},
 					},
@@ -224,6 +375,9 @@ var WPFormsFormEmbedWizard = window.WPFormsFormEmbedWizard || ( function( docume
 							app.embedPageRedirect();
 						},
 					},
+				},
+				onClose: function() {
+					el.$sectionGo.find( 'button' ).prop( 'disabled', false );
 				},
 			} );
 		},
@@ -290,7 +444,6 @@ var WPFormsFormEmbedWizard = window.WPFormsFormEmbedWizard || ( function( docume
 
 			// Regular wizard and wizard in Challenge has differences.
 			el.$wizard.toggleClass( 'wpforms-challenge-popup', vars.isChallengeActive );
-			el.$wizard.find( '.wpforms-admin-popup-close' ).toggle( ! vars.isChallengeActive );
 			el.$wizard.find( '.wpforms-admin-popup-content-regular' ).toggle( ! vars.isChallengeActive );
 			el.$wizard.find( '.wpforms-admin-popup-content-challenge' ).toggle( vars.isChallengeActive );
 
@@ -315,11 +468,10 @@ var WPFormsFormEmbedWizard = window.WPFormsFormEmbedWizard || ( function( docume
 		 */
 		closePopup: function() {
 
-			// Hide and stop video if opened.
-			if ( el.$videoTutorial.is( ':visible' ) ) {
-				el.$wizard.find( '.tutorial-toggle' ).click();
-			}
 			el.$wizardContainer.fadeOut();
+			app.initialStateToggle();
+
+			$( document ).trigger( 'wpformsWizardPopupClose' );
 		},
 
 		/**
@@ -329,28 +481,29 @@ var WPFormsFormEmbedWizard = window.WPFormsFormEmbedWizard || ( function( docume
 		 */
 		initTooltip: function() {
 
-			var $dot = $( '<span class="wpforms-challenge-dot wpforms-challenge-dot-step5" data-wpforms-challenge-step="5">&nbsp;</span>' ),
+			if ( typeof $.fn.tooltipster === 'undefined' ) {
+				return;
+			}
+
+			var $dot = $( '<span class="wpforms-admin-form-embed-wizard-dot">&nbsp;</span>' ),
 				isGutengerg = app.isGutenberg(),
 				anchor = isGutengerg ? '.block-editor .edit-post-header' : '#wp-content-editor-tools .wpforms-insert-form-button';
 
 			var tooltipsterArgs = {
-				content          : $( '#tooltip-content5' ),
+				content          : $( '#wpforms-admin-form-embed-wizard-tooltip-content' ),
 				trigger          : 'custom',
 				interactive      : true,
 				animationDuration: 0,
 				delay            : 0,
-				theme            : [ 'tooltipster-default', 'wpforms-challenge-tooltip' ],
+				theme            : [ 'tooltipster-default', 'wpforms-admin-form-embed-wizard' ],
 				side             : isGutengerg ? 'bottom' : 'right',
 				distance         : 3,
 				functionReady    : function( instance, helper ) {
 
-					// We need this to properly reuse styles from the challenge.
-					$( helper.tooltip ).addClass( 'wpforms-challenge-tooltip-step5' );
-
 					instance._$tooltip.on( 'click', 'button', function() {
 
 						instance.close();
-						$( '.wpforms-challenge-dot.wpforms-challenge-dot-step5' ).remove();
+						$( '.wpforms-admin-form-embed-wizard-dot' ).remove();
 					} );
 
 					instance.reposition();

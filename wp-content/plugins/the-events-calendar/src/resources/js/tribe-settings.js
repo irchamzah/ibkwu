@@ -6,7 +6,7 @@ jQuery( function( $ ) {
 
 	// toggle view of the google maps size fields
 	function updateMapsFields() {
-		if ( $( '.google-embed-size input' ).attr( "checked" ) ) {
+		if ( $( '.google-embed-size input' ).prop( "checked" ) ) {
 			$( '.google-embed-field' ).slideDown();
 		}
 		else {
@@ -16,7 +16,7 @@ jQuery( function( $ ) {
 
 } );
 
-( function( $, data ) {
+( function( $, data ) { // eslint-disable-line no-unused-vars
 	"use strict";
 
 	/**

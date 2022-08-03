@@ -21,7 +21,7 @@ class Elementor implements IntegrationInterface {
 	 */
 	public function allow_load() {
 
-		return did_action( 'elementor/loaded' );
+		return (bool) did_action( 'elementor/loaded' );
 	}
 
 	/**
@@ -68,18 +68,18 @@ class Elementor implements IntegrationInterface {
 		 *
 		 * @since 1.6.0
 		 *
-		 * @param bool $use_compat
+		 * @param bool $use_compat Use compatibility.
 		 */
-		$use_compat = apply_filters( 'wpforms_apply_elementor_preview_compat', true );
+		$use_compat = (bool) apply_filters( 'wpforms_apply_elementor_preview_compat', true );
 
-		if ( true !== $use_compat ) {
+		if ( $use_compat !== true ) {
 			return;
 		}
 
 		// Load WPForms assets globally on Elementor Preview panel only.
 		add_filter( 'wpforms_global_assets', '__return_true' );
 
-		// Hide reCAPTCHA badge on Elementor Preview panel.
+		// Hide CAPTCHA badge on Elementor Preview panel.
 		add_filter( 'wpforms_frontend_recaptcha_disable', '__return_true' );
 	}
 
@@ -150,13 +150,14 @@ class Elementor implements IntegrationInterface {
 			'wpforms-elementor',
 			'wpformsElementorVars',
 			[
-				'recaptcha_type' => wpforms_setting( 'recaptcha-type', 'v2' ),
+				'captcha_provider' => wpforms_setting( 'captcha-provider', 'recaptcha' ),
+				'recaptcha_type'   => wpforms_setting( 'recaptcha-type', 'v2' ),
 			]
 		);
 	}
 
 	/**
-	 * Load an integration css in the elementor document.
+	 * Load assets in the elementor document.
 	 *
 	 * @since 1.6.2
 	 */

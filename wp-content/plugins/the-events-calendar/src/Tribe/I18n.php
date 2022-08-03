@@ -148,7 +148,7 @@ class I18n {
 		foreach ( $strings as $key => $value ) {
 			$strings[ $key ] = array_filter(
 				array_unique(
-					array_map( 'sanitize_title_with_dashes', (array) $value )
+					array_map( 'sanitize_key', (array) $value )
 				)
 			);
 		}
@@ -187,6 +187,20 @@ class I18n {
 		add_filter( 'locale', $force_locale );
 		$result = $do( ...$args );
 		remove_filter( 'locale', $force_locale );
+
+		$domains = isset( $args[1] ) ? (array) $args[1] : false;
+		if ( false !== $domains ) {
+			foreach ( $domains as $domain => $file ) {
+				// Reload it with the correct language.
+				unload_textdomain( $domain );
+
+				if ( 'default' === $domain ) {
+					load_default_textdomain();
+				} elseif ( is_string( $file ) ) {
+					Common::instance()->load_text_domain( $domain, $file );
+				}
+			}
+		}
 
 		// Restore the `locale` filtering functions.
 		$wp_filter['locale'] = $locale_filters_backup;
